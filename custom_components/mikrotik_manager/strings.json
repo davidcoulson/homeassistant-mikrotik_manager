@@ -1,8 +1,52 @@
 {
   "config": {
-    "step": { "user": { "title": "MikroTik Manager", "description": "Use a read-scope API token from Settings → Automation.",
-      "data": { "url": "Manager URL", "token": "API token", "verify_ssl": "Verify TLS certificate" } } },
-    "error": { "invalid_auth": "Token rejected", "cannot_connect": "Could not reach the manager" },
-    "abort": { "already_configured": "This manager is already configured" }
+    "step": {
+      "user": {
+        "title": "MikroTik Manager",
+        "description": "Use a read-scope API token from Settings → Automation.",
+        "data": {
+          "url": "Manager URL",
+          "token": "API token",
+          "verify_ssl": "Verify TLS certificate"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Token rejected",
+      "cannot_connect": "Could not reach the manager"
+    },
+    "abort": {
+      "already_configured": "This manager is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Throughput sensors",
+        "description": "Needs a manager version with /api/metrics/interfaces/latest. Ports are created as rx/tx bit-rate sensors.",
+        "data": {
+          "all_physical_ports": "All physical ports",
+          "throughput_ports": "Ports"
+        }
+      }
+    }
+  },
+  "issues": {
+    "device_offline": {
+      "title": "{name} is offline",
+      "description": "The manager reports {name} as offline."
+    },
+    "routerboot_upgrade": {
+      "title": "{name} needs a RouterBOOT upgrade",
+      "description": "RouterBOOT firmware on {name} can be upgraded to {version}. Do this in MikroTik Manager."
+    },
+    "ros_update": {
+      "title": "RouterOS update available for {name}",
+      "description": "{name} runs {installed}; {latest} is available. Update it in MikroTik Manager so backups and Change Guard apply."
+    },
+    "fleet_errors": {
+      "title": "Errors in the last 24 hours",
+      "description": "MikroTik Manager reports {count} critical alert(s) in the last 24 hours."
+    }
   }
 }

@@ -38,3 +38,7 @@ class ManagerClient:
 
     async def poe(self, device_id: int) -> list[dict[str, Any]]:
         return (await self.get(f"/api/metrics/device/{device_id}/poe")).get("ports", [])
+
+    async def interfaces_latest(self) -> dict[str, dict[str, dict[str, Any]]]:
+        """Latest interface counters per device; 404 on managers without the endpoint."""
+        return (await self.get("/api/metrics/interfaces/latest")).get("devices", {})
