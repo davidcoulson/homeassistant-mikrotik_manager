@@ -17,7 +17,20 @@ async def async_setup_entry(hass, entry, async_add_entities):
         known.update(d["id"] for d in new)
         async_add_entities(DeviceOnline(coordinator, entry, d["id"]) for d in new)
 
+    known_ports: set[tuple[int, str]] = set()
+
+    def _add_ports() -> None:
+        new = [
+            (did, p["name"])
+            for did, det in coordinator.data["detail"].items()
+            for p in det["ports"] if (did, p["name"]) not in known_ports
+        ]
+        known_ports.update(new)
+        async_add_entities(PortLink(coordinator, entry, did, name) for did, name in new)
+
     _add_new()
+    _add_ports()
+    entry.async_on_unload(coordinator.async_add_listener(_add_ports))
     entry.async_on_unload(coordinator.async_add_listener(_add_new))
 
 
@@ -49,3 +62,35 @@ class DeviceOnline(CoordinatorEntity, BinarySensorEntity):
     def is_on(self):
         d = self._device
         return None if d is None else d.get("status") == "online"
+
+
+class PortLink(CoordinatorEntity, BinarySensorEntity):
+    """Link state of one physical port; admin-disabled shows as an attribute, not 'down'."""
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+
+    def __init__(self, coordinator, entry, device_id, port):
+        super().__init__(coordinator)
+        self._id, self._port = device_id, port
+        self._attr_unique_id = f"{entry.entry_id}_device_{device_id}_{port}_link"
+        self._attr_name = f"{port} link"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, f"{entry.entry_id}_{device_id}")})
+
+    @property
+    def _row(self):
+        det = self.coordinator.data["detail"].get(self._id)
+        return next((p for p in det["ports"] if p["name"] == self._port), None) if det else None
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._row is not None
+
+    @property
+    def is_on(self):
+        r = self._row
+        return None if r is None else bool(r.get("running"))
+
+    @property
+    def extra_state_attributes(self):
+        r = self._row or {}
+        return {"disabled": bool(r.get("disabled")), "speed": r.get("speed"), "comment": r.get("comment")}

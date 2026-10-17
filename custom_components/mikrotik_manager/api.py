@@ -32,3 +32,9 @@ class ManagerClient:
     async def devices(self) -> list[dict[str, Any]]:
         data = await self.get("/api/devices")
         return data if isinstance(data, list) else data.get("devices", [])
+
+    async def ports(self, device_id: int) -> list[dict[str, Any]]:
+        return (await self.get(f"/api/devices/{device_id}/ports")).get("ports", [])
+
+    async def poe(self, device_id: int) -> list[dict[str, Any]]:
+        return (await self.get(f"/api/metrics/device/{device_id}/poe")).get("ports", [])
