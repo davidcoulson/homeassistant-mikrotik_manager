@@ -1,0 +1,8 @@
+{
+  "config": {
+    "step": { "user": { "title": "MikroTik Manager", "description": "Use a read-scope API token from Settings → Automation.",
+      "data": { "url": "Manager URL", "token": "API token", "verify_ssl": "Verify TLS certificate" } } },
+    "error": { "invalid_auth": "Token rejected", "cannot_connect": "Could not reach the manager" },
+    "abort": { "already_configured": "This manager is already configured" }
+  }
+}
