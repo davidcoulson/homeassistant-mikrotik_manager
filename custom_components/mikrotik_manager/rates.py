@@ -71,3 +71,11 @@ class RateTracker:
                 new_rates[key] = compute_rates(prev, sample)
                 self._samples[key] = sample
         self.rates = new_rates
+
+
+def pct(used, total):
+    """Percentage used/total, or None when total is missing or zero."""
+    try:
+        return round(used / total * 100, 1) if total else None
+    except (TypeError, ZeroDivisionError):
+        return None

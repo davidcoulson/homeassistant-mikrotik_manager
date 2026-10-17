@@ -49,6 +49,18 @@ def test_delta_mode():
         rates.COUNTERS_ARE_CUMULATIVE = True
 
 
+def test_pct():
+    assert rates.pct(256, 1024) == 25.0
+    assert rates.pct(1, 0) is None
+    assert rates.pct(None, 1024) is None
+
+
+def test_update_supported_features_is_flag():
+    """A bare int made HA raise TypeError while adding the entity, so none appeared."""
+    src = (pathlib.Path(__file__).parents[1] / "custom_components/mikrotik_manager/update.py").read_text()
+    assert "UpdateEntityFeature(0)" in src and "_attr_supported_features = 0\n" not in src
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

@@ -1,11 +1,11 @@
 """Read-only RouterOS update status per device (updates are applied in the manager)."""
 from __future__ import annotations
 
-from homeassistant.components.update import UpdateEntity
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.components.update import UpdateEntity, UpdateEntityFeature
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .entity import router_device_info
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -24,14 +24,17 @@ async def async_setup_entry(hass, entry, async_add_entities):
 class RouterOsUpdate(CoordinatorEntity, UpdateEntity):
     """No install support: updates go through the manager so backups and Change Guard apply."""
 
-    _attr_supported_features = 0
+    _attr_has_entity_name = True
+    # Must be an UpdateEntityFeature flag, not a bare int: HA does `FLAG in supported_features`
+    # when registering the entity, and a plain 0 raised TypeError so no entity was ever added.
+    _attr_supported_features = UpdateEntityFeature(0)
 
     def __init__(self, coordinator, entry, device_id):
         super().__init__(coordinator)
         self._id = device_id
         self._attr_unique_id = f"{entry.entry_id}_device_{device_id}_ros_update"
         self._attr_name = "RouterOS"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, f"{entry.entry_id}_{device_id}")})
+        self._attr_device_info = router_device_info(entry, coordinator, device_id)
 
     @property
     def _device(self):

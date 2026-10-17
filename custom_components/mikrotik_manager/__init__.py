@@ -67,6 +67,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("interfaces/latest failed: %s", err)
 
+    resources_ok = True  # flips off (logged once) when the manager lacks the endpoint
+
+    async def _resources() -> dict:
+        nonlocal resources_ok
+        if not resources_ok:
+            return {}
+        try:
+            return await client.resources_latest()
+        except ManagerAuthError:
+            raise
+        except ClientResponseError as err:
+            if err.status == 404:
+                resources_ok = False
+                _LOGGER.debug("Manager has no /api/metrics/resources/latest; CPU/memory sensors disabled")
+            else:
+                _LOGGER.debug("resources/latest failed: %s", err)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("resources/latest failed: %s", err)
+        return {}
+
     async def _update() -> dict:
         try:
             devices = await client.devices()
@@ -74,9 +94,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 *(_per_device(d) for d in devices if d.get("status") == "online")
             ))
             await _throughput()
+            resources = await _resources()
             data = {
                 "summary": await client.summary(), "devices": devices, "detail": detail,
-                "rates": tracker.rates,
+                "rates": tracker.rates, "resources": resources,
             }
             sync_issues(hass, entry.entry_id, data, issues)
             return data

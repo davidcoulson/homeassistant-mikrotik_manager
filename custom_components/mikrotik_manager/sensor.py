@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
-from homeassistant.const import UnitOfDataRate, UnitOfPower
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.const import PERCENTAGE, UnitOfDataRate, UnitOfPower
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_ALL_PORTS, CONF_THROUGHPUT_PORTS, DOMAIN
+from .entity import fleet_device_info, router_device_info
+from .rates import pct
 
 # (key, name, path into the summary payload)
 FLEET_SENSORS = [
@@ -22,6 +23,20 @@ FLEET_SENSORS = [
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(FleetSensor(coordinator, entry, *s) for s in FLEET_SENSORS)
+
+    known_res: set[int] = set()
+
+    def _add_resources() -> None:
+        res = coordinator.data.get("resources") or {}
+        new = [int(i) for i in res if int(i) not in known_res and any(
+            int(d["id"]) == int(i) for d in coordinator.data["devices"])]
+        known_res.update(new)
+        async_add_entities(
+            cls(coordinator, entry, did) for did in new for cls in (CpuLoad, MemoryUsage)
+        )
+
+    _add_resources()
+    entry.async_on_unload(coordinator.async_add_listener(_add_resources))
 
     known: set[tuple[int, str]] = set()
 
@@ -62,12 +77,14 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 
 class FleetSensor(CoordinatorEntity, SensorEntity):
+    _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator, entry, key, name, path):
         super().__init__(coordinator)
         self._path = path
-        self._attr_name = f"MikroTik Manager {name}"
+        self._attr_name = name
+        self._attr_device_info = fleet_device_info(entry)
         self._attr_unique_id = f"{entry.entry_id}_{key}"
         if key == "fleet_uptime_30d":
             self._attr_native_unit_of_measurement = "%"
@@ -81,6 +98,7 @@ class FleetSensor(CoordinatorEntity, SensorEntity):
 
 
 class PoePower(CoordinatorEntity, SensorEntity):
+    _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -90,7 +108,7 @@ class PoePower(CoordinatorEntity, SensorEntity):
         self._id, self._port = device_id, port
         self._attr_unique_id = f"{entry.entry_id}_device_{device_id}_{port}_poe"
         self._attr_name = f"{port} PoE power"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, f"{entry.entry_id}_{device_id}")})
+        self._attr_device_info = router_device_info(entry, coordinator, device_id)
 
     @property
     def _row(self):
@@ -114,6 +132,7 @@ class PoePower(CoordinatorEntity, SensorEntity):
 class PortRate(CoordinatorEntity, SensorEntity):
     """Rx/tx bit rate of one physical port, derived from successive counter samples."""
 
+    _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.DATA_RATE
     _attr_native_unit_of_measurement = UnitOfDataRate.BITS_PER_SECOND
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -123,7 +142,7 @@ class PortRate(CoordinatorEntity, SensorEntity):
         self._id, self._port, self._dir = device_id, port, direction
         self._attr_unique_id = f"{entry.entry_id}_device_{device_id}_{port}_{direction}_rate"
         self._attr_name = f"{port} {direction} rate"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, f"{entry.entry_id}_{device_id}")})
+        self._attr_device_info = router_device_info(entry, coordinator, device_id)
 
     @property
     def native_value(self):
@@ -132,3 +151,47 @@ class PortRate(CoordinatorEntity, SensorEntity):
             return None
         value = pair[0] if self._dir == "rx" else pair[1]
         return None if value is None else round(value)
+
+
+class _ResourceSensor(CoordinatorEntity, SensorEntity):
+    """Base for CPU/memory sensors fed by /api/metrics/resources/latest."""
+
+    _attr_has_entity_name = True
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _suffix = ""
+
+    def __init__(self, coordinator, entry, device_id):
+        super().__init__(coordinator)
+        self._id = device_id
+        self._attr_unique_id = f"{entry.entry_id}_device_{device_id}_{self._suffix}"
+        self._attr_device_info = router_device_info(entry, coordinator, device_id)
+
+    @property
+    def _row(self):
+        res = self.coordinator.data.get("resources") or {}
+        return res.get(str(self._id)) or res.get(self._id)
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._row is not None
+
+
+class CpuLoad(_ResourceSensor):
+    _attr_name = "CPU load"
+    _suffix = "cpu_load"
+
+    @property
+    def native_value(self):
+        r = self._row
+        return None if r is None else r.get("cpu_load")
+
+
+class MemoryUsage(_ResourceSensor):
+    _attr_name = "Memory usage"
+    _suffix = "memory_usage"
+
+    @property
+    def native_value(self):
+        r = self._row
+        return None if r is None else pct(r.get("memory_used"), r.get("memory_total"))
