@@ -7,6 +7,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_ALL_PORTS, CONF_THROUGHPUT_PORTS, DOMAIN
 from .entity import fleet_device_info, router_device_info
+from .logic import MAX_FINDINGS, MAX_INSIGHTS
 from .rates import pct
 
 # (key, name, path into the summary payload)
@@ -23,6 +24,17 @@ FLEET_SENSORS = [
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(FleetSensor(coordinator, entry, *s) for s in FLEET_SENSORS)
+    async_add_entities([NeedsAttention(coordinator, entry)])
+
+    known_health: set[int] = set()
+
+    def _add_health() -> None:
+        new = [int(i) for i in (coordinator.data.get("config_health") or {}) if int(i) not in known_health]
+        known_health.update(new)
+        async_add_entities(ConfigFindings(coordinator, entry, did) for did in new)
+
+    _add_health()
+    entry.async_on_unload(coordinator.async_add_listener(_add_health))
 
     known_res: set[int] = set()
 
@@ -195,3 +207,67 @@ class MemoryUsage(_ResourceSensor):
     def native_value(self):
         r = self._row
         return None if r is None else pct(r.get("memory_used"), r.get("memory_total"))
+
+
+class ConfigFindings(CoordinatorEntity, SensorEntity):
+    """Open config-health findings for one device (list in attributes, capped)."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Config findings"
+    _attr_icon = "mdi:shield-search"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, entry, device_id):
+        super().__init__(coordinator)
+        self._id = device_id
+        self._attr_unique_id = f"{entry.entry_id}_device_{device_id}_config_findings"
+        self._attr_device_info = router_device_info(entry, coordinator, device_id)
+
+    @property
+    def _row(self):
+        return (self.coordinator.data.get("config_health") or {}).get(self._id)
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._row is not None
+
+    @property
+    def native_value(self):
+        r = self._row
+        return None if r is None else r["count"]
+
+    @property
+    def extra_state_attributes(self):
+        r = self._row
+        if r is None:
+            return None
+        return {"critical": r["critical"], "checked_at": r["checked_at"],
+                "findings": r["findings"][:MAX_FINDINGS]}
+
+
+class NeedsAttention(CoordinatorEntity, SensorEntity):
+    """Fleet-level count of items the manager flags as needing attention."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Needs attention"
+    _attr_icon = "mdi:alert-circle-outline"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_needs_attention"
+        self._attr_device_info = fleet_device_info(entry)
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.coordinator.data.get("insights") is not None
+
+    @property
+    def native_value(self):
+        i = self.coordinator.data.get("insights")
+        return None if i is None else i["count"]
+
+    @property
+    def extra_state_attributes(self):
+        i = self.coordinator.data.get("insights")
+        return None if i is None else {"items": i["items"][:MAX_INSIGHTS]}

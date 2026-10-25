@@ -3,11 +3,18 @@
     "step": {
       "user": {
         "title": "MikroTik Manager",
-        "description": "Use a read-scope API token from Settings → Automation.",
+        "description": "Use a read-scope API token from Settings → Automation. To receive pushed events, add a webhook under Configure after setup.",
         "data": {
           "url": "Manager URL",
           "token": "API token",
           "verify_ssl": "Verify TLS certificate"
+        }
+      },
+      "site": {
+        "title": "Site",
+        "description": "This manager has several sites. Choose one to limit everything to that site, or keep All sites.",
+        "data": {
+          "site_id": "Site"
         }
       }
     },
@@ -22,9 +29,11 @@
   "options": {
     "step": {
       "init": {
-        "title": "Throughput sensors",
-        "description": "Needs a manager version with /api/metrics/interfaces/latest. Ports are created as rx/tx bit-rate sensors.",
+        "title": "MikroTik Manager options",
+        "description": "**Webhook push.** In the manager go to Settings → Alerting → Outbound webhooks, add this URL and tick the events you want (for instance device_offline and device_online). The manager only posts to public addresses, so the URL must be reachable from outside your LAN (Nabu Casa or a reverse proxy):\n\n`{webhook_url}`\n\nIf you set a secret in the manager, enter the same one below and unsigned or wrongly signed requests are rejected. Leave it empty to accept any post. Events fire `mikrotik_manager_event` on the HA bus.\n\n**Throughput sensors** need a manager with /api/metrics/interfaces/latest; ports become rx/tx bit-rate sensors.",
         "data": {
+          "site_id": "Site",
+          "webhook_secret": "Webhook secret",
           "all_physical_ports": "All physical ports",
           "throughput_ports": "Ports"
         }
@@ -47,6 +56,10 @@
     "fleet_errors": {
       "title": "Errors in the last 24 hours",
       "description": "MikroTik Manager reports {count} critical alert(s) in the last 24 hours."
+    },
+    "config_health_finding": {
+      "title": "{name}: {title}",
+      "description": "MikroTik Manager's config health audit found a critical issue on {name}: {detail} Review and fix it in the manager's Config health tab; this clears itself once the finding is resolved."
     }
   }
 }

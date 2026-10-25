@@ -5,6 +5,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 
 from .const import DOMAIN
+from .logic import high_findings
 
 
 def _wanted(entry_id: str, data: dict) -> dict[str, tuple[str, ir.IssueSeverity, dict]]:
@@ -25,6 +26,15 @@ def _wanted(entry_id: str, data: dict) -> dict[str, tuple[str, ir.IssueSeverity,
                 "ros_update", ir.IssueSeverity.WARNING,
                 {"name": name, "installed": d.get("ros_version") or "unknown",
                  "latest": d.get("latest_ros_version") or "unknown"},
+            )
+    names = {d["id"]: d.get("name") or f"device {d['id']}" for d in data["devices"]}
+    for did, parsed in (data.get("config_health") or {}).items():
+        for f in high_findings(parsed):
+            out[f"{entry_id}_device_{did}_config_{f['rule']}"] = (
+                "config_health_finding", ir.IssueSeverity.ERROR,
+                {"name": names.get(did, f"device {did}"),
+                 "title": f.get("title") or f["rule"],
+                 "detail": f.get("detail") or "See the device's Config health in MikroTik Manager."},
             )
     alerts = (data.get("summary") or {}).get("alerts") or {}
     errors = alerts.get("critical") or 0
