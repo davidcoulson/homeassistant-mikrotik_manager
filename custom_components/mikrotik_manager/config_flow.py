@@ -43,7 +43,10 @@ class OptionsFlow(config_entries.OptionsFlow):
     """Choose which physical ports get rx/tx throughput sensors (default: none)."""
 
     async def async_step_init(self, user_input=None):
+        current = self.config_entry.options
         if user_input is not None:
+            if CONF_SITE_ID not in user_input and CONF_SITE_ID in current:
+                user_input = {**user_input, CONF_SITE_ID: current[CONF_SITE_ID]}  # selector was not offered
             return self.async_create_entry(data=user_input)
         coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
         choices: dict[str, str] = {}
@@ -57,8 +60,9 @@ class OptionsFlow(config_entries.OptionsFlow):
             for did, det in coordinator.data["detail"].items():
                 for p in det["ports"]:
                     choices[f"{did}/{p['name']}"] = f"{names.get(did, did)}: {p['name']}"
-        current = self.config_entry.options
-        selected = [k for k in current.get(CONF_THROUGHPUT_PORTS, []) if k in choices]
+        selected = current.get(CONF_THROUGHPUT_PORTS, [])
+        for k in selected:  # ports of offline devices are not in the current poll; keep them
+            choices.setdefault(k, k)
         schema: dict = {}
         if len(sites) > 2:  # "All sites" plus at least two real ones
             chosen = current.get(CONF_SITE_ID, self.config_entry.data.get(CONF_SITE_ID)) or SITE_ALL
