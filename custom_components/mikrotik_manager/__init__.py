@@ -12,13 +12,14 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_TOKEN, CONF_URL
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import ManagerAuthError, ManagerClient, ManagerForbiddenError
 from .const import (
-    CONF_SITE_ID, CONF_VERIFY_SSL, CONF_WEBHOOK_SECRET, CONFIG_HEALTH_EVERY,
-    DEFAULT_SCAN_INTERVAL, DOMAIN, EVENT_NAME, PLATFORMS, SITE_ALL,
+    CONF_SITE_ID, CONF_VERIFY_SSL, CONF_WEBHOOK_ID, CONF_WEBHOOK_SECRET, CONFIG_HEALTH_EVERY,
+    DEFAULT_SCAN_INTERVAL, DOMAIN, EVENT_NAME, PLATFORMS, SITE_ALL, legacy_webhook_id,
 )
 from .logic import REFRESH_EVENTS, parse_config_health, parse_insights, parse_webhook, verify_signature
 from .rates import RateTracker
@@ -28,6 +29,15 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    if CONF_WEBHOOK_ID not in entry.data:  # existing install: pin the old URL so nothing changes
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_WEBHOOK_ID: legacy_webhook_id(entry.entry_id)})
+    if webhook_id(entry) == legacy_webhook_id(entry.entry_id):
+        ir.async_create_issue(
+            hass, DOMAIN, f"webhook_guessable_{entry.entry_id}", is_fixable=False,
+            severity=ir.IssueSeverity.WARNING, translation_key="webhook_guessable")
+    else:
+        ir.async_delete_issue(hass, DOMAIN, f"webhook_guessable_{entry.entry_id}")
     client = ManagerClient(
         async_get_clientsession(hass),
         entry.data[CONF_URL],
@@ -62,6 +72,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return
         try:
             tracker.update(await client.interfaces_latest())
+            return
         except ManagerAuthError:
             raise
         except ClientResponseError as err:
@@ -72,6 +83,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.debug("interfaces/latest failed: %s", err)
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("interfaces/latest failed: %s", err)
+        tracker.rates = {}  # do not republish old rates as current
 
     resources_ok = True  # flips off (logged once) when the manager lacks the endpoint
 
@@ -118,6 +130,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             except ManagerAuthError:
                 raise
             except Exception as err:  # noqa: BLE001
+                health_cache.pop(did, None)  # unknown beats stale; retried next cycle
                 _LOGGER.debug("config-health for device %s failed: %s", did, err)
 
         await asyncio.gather(*(one(d) for d in online if due or d not in health_cache))
@@ -189,7 +202,7 @@ def site_id(entry: ConfigEntry) -> str | None:
 
 
 def webhook_id(entry: ConfigEntry) -> str:
-    return f"{DOMAIN}_{entry.entry_id}"
+    return entry.data.get(CONF_WEBHOOK_ID) or legacy_webhook_id(entry.entry_id)
 
 
 def _register_webhook(hass: HomeAssistant, entry: ConfigEntry, coordinator) -> None:

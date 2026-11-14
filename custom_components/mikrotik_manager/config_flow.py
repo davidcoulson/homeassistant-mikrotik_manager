@@ -1,6 +1,8 @@
 """Config flow: manager URL, read-scope API token, TLS verification."""
 from __future__ import annotations
 
+import secrets
+
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -13,8 +15,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import ManagerAuthError, ManagerClient
 from .const import (
-    CONF_ALL_PORTS, CONF_SITE_ID, CONF_THROUGHPUT_PORTS, CONF_VERIFY_SSL,
-    CONF_WEBHOOK_SECRET, DOMAIN, SITE_ALL,
+    CONF_ALL_PORTS, CONF_REGENERATE_WEBHOOK, CONF_SITE_ID, CONF_THROUGHPUT_PORTS,
+    CONF_VERIFY_SSL, CONF_WEBHOOK_ID, CONF_WEBHOOK_SECRET, DOMAIN, SITE_ALL, legacy_webhook_id,
 )
 
 _SECRET_SELECTOR = selector.TextSelector(
@@ -31,8 +33,8 @@ def site_choices(sites: list[dict]) -> dict[str, str]:
     return out
 
 
-def _webhook_url(hass, entry_id: str) -> str:
-    wid = f"{DOMAIN}_{entry_id}"
+def _webhook_url(hass, entry) -> str:
+    wid = entry.data.get(CONF_WEBHOOK_ID) or legacy_webhook_id(entry.entry_id)
     try:
         return webhook.async_generate_url(hass, wid)
     except Exception:  # noqa: BLE001 - no URL configured in HA
@@ -43,7 +45,15 @@ class OptionsFlow(config_entries.OptionsFlow):
     """Choose which physical ports get rx/tx throughput sensors (default: none)."""
 
     async def async_step_init(self, user_input=None):
+        current = self.config_entry.options
         if user_input is not None:
+            if user_input.pop(CONF_REGENERATE_WEBHOOK, False):
+                self.hass.config_entries.async_update_entry(self.config_entry, data={
+                    **self.config_entry.data, CONF_WEBHOOK_ID: secrets.token_hex(32)})
+                self._options = user_input
+                return await self.async_step_regenerated()
+            if CONF_SITE_ID not in user_input and CONF_SITE_ID in current:
+                user_input = {**user_input, CONF_SITE_ID: current[CONF_SITE_ID]}  # selector was not offered
             return self.async_create_entry(data=user_input)
         coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
         choices: dict[str, str] = {}
@@ -57,8 +67,9 @@ class OptionsFlow(config_entries.OptionsFlow):
             for did, det in coordinator.data["detail"].items():
                 for p in det["ports"]:
                     choices[f"{did}/{p['name']}"] = f"{names.get(did, did)}: {p['name']}"
-        current = self.config_entry.options
-        selected = [k for k in current.get(CONF_THROUGHPUT_PORTS, []) if k in choices]
+        selected = current.get(CONF_THROUGHPUT_PORTS, [])
+        for k in selected:  # ports of offline devices are not in the current poll; keep them
+            choices.setdefault(k, k)
         schema: dict = {}
         if len(sites) > 2:  # "All sites" plus at least two real ones
             chosen = current.get(CONF_SITE_ID, self.config_entry.data.get(CONF_SITE_ID)) or SITE_ALL
@@ -68,14 +79,23 @@ class OptionsFlow(config_entries.OptionsFlow):
         schema[vol.Optional(
             CONF_WEBHOOK_SECRET, description={"suggested_value": current.get(CONF_WEBHOOK_SECRET)}
         )] = _SECRET_SELECTOR
+        schema[vol.Optional(CONF_REGENERATE_WEBHOOK, default=False)] = bool
         schema[vol.Optional(CONF_ALL_PORTS, default=current.get(CONF_ALL_PORTS, False))] = bool
         schema[vol.Optional(CONF_THROUGHPUT_PORTS, default=selected)] = cv.multi_select(choices)
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(schema),
             description_placeholders={
-                "webhook_url": _webhook_url(self.hass, self.config_entry.entry_id)
+                "webhook_url": _webhook_url(self.hass, self.config_entry)
             },
+        )
+
+    async def async_step_regenerated(self, user_input=None):
+        if user_input is not None:
+            return self.async_create_entry(data={**self.config_entry.options, **self._options})
+        return self.async_show_form(
+            step_id="regenerated", data_schema=vol.Schema({}),
+            description_placeholders={"webhook_url": _webhook_url(self.hass, self.config_entry)},
         )
 
 
@@ -86,6 +106,32 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry):
         return OptionsFlow()
+
+    async def async_step_reauth(self, entry_data):
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input=None):
+        errors: dict[str, str] = {}
+        entry = self._get_reauth_entry()
+        if user_input is not None:
+            client = ManagerClient(
+                async_get_clientsession(self.hass), entry.data[CONF_URL],
+                user_input[CONF_TOKEN], entry.data.get(CONF_VERIFY_SSL, True),
+            )
+            try:
+                await client.summary()
+            except ManagerAuthError:
+                errors["base"] = "invalid_auth"
+            except Exception:  # noqa: BLE001
+                errors["base"] = "cannot_connect"
+            else:
+                return self.async_update_reload_and_abort(
+                    entry, data_updates={CONF_TOKEN: user_input[CONF_TOKEN]}
+                )
+        return self.async_show_form(
+            step_id="reauth_confirm", errors=errors,
+            data_schema=vol.Schema({vol.Required(CONF_TOKEN): str}),
+        )
 
     async def async_step_site(self, user_input=None):
         if user_input is not None:
@@ -114,14 +160,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 await self.async_set_unique_id(user_input[CONF_URL].rstrip("/"))
                 self._abort_if_unique_id_configured()
-                self._data = user_input
+                self._data = {**user_input, CONF_WEBHOOK_ID: secrets.token_hex(32)}
                 try:  # the site step is skipped when sites cannot be listed or there is only one
                     self._sites = site_choices(await client.sites())
                 except Exception:  # noqa: BLE001
                     self._sites = {}
                 if len(self._sites) > 2:
                     return await self.async_step_site()
-                return self.async_create_entry(title="MikroTik Manager", data=user_input)
+                return self.async_create_entry(title="MikroTik Manager", data=self._data)
         return self.async_show_form(
             step_id="user",
             errors=errors,

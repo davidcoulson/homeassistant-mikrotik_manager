@@ -16,6 +16,13 @@
         "data": {
           "site_id": "Site"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate",
+        "description": "The manager rejected the API token. Enter a new read-scope token.",
+        "data": {
+          "token": "API token"
+        }
       }
     },
     "error": {
@@ -23,7 +30,8 @@
       "cannot_connect": "Could not reach the manager"
     },
     "abort": {
-      "already_configured": "This manager is already configured"
+      "already_configured": "This manager is already configured",
+      "reauth_successful": "Token updated"
     }
   },
   "options": {
@@ -35,8 +43,13 @@
           "site_id": "Site",
           "webhook_secret": "Webhook secret",
           "all_physical_ports": "All physical ports",
-          "throughput_ports": "Ports"
+          "throughput_ports": "Ports",
+          "regenerate_webhook": "Regenerate webhook URL (update it in the manager afterwards)"
         }
+      },
+      "regenerated": {
+        "title": "New webhook URL",
+        "description": "Replace the old URL in the manager (Settings → Alerting → Outbound webhooks) with:\n\n`{webhook_url}`\n\nThe old URL no longer works."
       }
     }
   },
@@ -60,6 +73,10 @@
     "config_health_finding": {
       "title": "{name}: {title}",
       "description": "MikroTik Manager's config health audit found a critical issue on {name}: {detail} Review and fix it in the manager's Config health tab; this clears itself once the finding is resolved."
+    },
+    "webhook_guessable": {
+      "title": "Webhook URL is guessable",
+      "description": "This entry's webhook URL is derived from the config entry id, which is not secret. Open Configure on the integration, tick Regenerate webhook URL, then paste the new URL into the manager. Also set a webhook secret so forged events are rejected."
     }
   }
 }
