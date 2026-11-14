@@ -87,6 +87,32 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(config_entry):
         return OptionsFlow()
 
+    async def async_step_reauth(self, entry_data):
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input=None):
+        errors: dict[str, str] = {}
+        entry = self._get_reauth_entry()
+        if user_input is not None:
+            client = ManagerClient(
+                async_get_clientsession(self.hass), entry.data[CONF_URL],
+                user_input[CONF_TOKEN], entry.data.get(CONF_VERIFY_SSL, True),
+            )
+            try:
+                await client.summary()
+            except ManagerAuthError:
+                errors["base"] = "invalid_auth"
+            except Exception:  # noqa: BLE001
+                errors["base"] = "cannot_connect"
+            else:
+                return self.async_update_reload_and_abort(
+                    entry, data_updates={CONF_TOKEN: user_input[CONF_TOKEN]}
+                )
+        return self.async_show_form(
+            step_id="reauth_confirm", errors=errors,
+            data_schema=vol.Schema({vol.Required(CONF_TOKEN): str}),
+        )
+
     async def async_step_site(self, user_input=None):
         if user_input is not None:
             data = {**self._data}

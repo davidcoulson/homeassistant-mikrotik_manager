@@ -16,6 +16,13 @@
         "data": {
           "site_id": "Site"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate",
+        "description": "The manager rejected the API token. Enter a new read-scope token.",
+        "data": {
+          "token": "API token"
+        }
       }
     },
     "error": {
@@ -23,7 +30,8 @@
       "cannot_connect": "Could not reach the manager"
     },
     "abort": {
-      "already_configured": "This manager is already configured"
+      "already_configured": "This manager is already configured",
+      "reauth_successful": "Token updated"
     }
   },
   "options": {
