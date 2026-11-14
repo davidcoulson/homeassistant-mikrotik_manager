@@ -26,3 +26,17 @@ async def test_options_keep_site_and_offline_ports(hass, enable_custom_integrati
         result["flow_id"], {"throughput_ports": ["1/ether1"]})
     assert result["data"]["site_id"] == "2"
     assert result["data"]["throughput_ports"] == ["1/ether1"]
+
+
+async def test_regenerate_webhook_replaces_legacy_id(hass, enable_custom_integrations):
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"regenerate_webhook": True})
+    assert result["step_id"] == "regenerated"
+    new_id = entry.data["webhook_id"]
+    assert len(new_id) == 64 and new_id != f"{DOMAIN}_{entry.entry_id}"
+    assert new_id in result["description_placeholders"]["webhook_url"]
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    assert "regenerate_webhook" not in result["data"]

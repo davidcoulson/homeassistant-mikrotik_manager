@@ -9,6 +9,12 @@ CONF_ALL_PORTS = "all_physical_ports"
 
 CONF_SITE_ID = "site_id"
 CONF_WEBHOOK_SECRET = "webhook_secret"
+CONF_WEBHOOK_ID = "webhook_id"
+CONF_REGENERATE_WEBHOOK = "regenerate_webhook"
 SITE_ALL = "all"
 EVENT_NAME = "mikrotik_manager_event"
 CONFIG_HEALTH_EVERY = 5  # refresh config-health every Nth coordinator cycle
+
+
+def legacy_webhook_id(entry_id: str) -> str:
+    return f"{DOMAIN}_{entry_id}"
