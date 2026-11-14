@@ -62,6 +62,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return
         try:
             tracker.update(await client.interfaces_latest())
+            return
         except ManagerAuthError:
             raise
         except ClientResponseError as err:
@@ -72,6 +73,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.debug("interfaces/latest failed: %s", err)
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("interfaces/latest failed: %s", err)
+        tracker.rates = {}  # do not republish old rates as current
 
     resources_ok = True  # flips off (logged once) when the manager lacks the endpoint
 
@@ -118,6 +120,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             except ManagerAuthError:
                 raise
             except Exception as err:  # noqa: BLE001
+                health_cache.pop(did, None)  # unknown beats stale; retried next cycle
                 _LOGGER.debug("config-health for device %s failed: %s", did, err)
 
         await asyncio.gather(*(one(d) for d in online if due or d not in health_cache))
