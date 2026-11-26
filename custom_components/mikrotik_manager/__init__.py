@@ -3,18 +3,22 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+import importlib
 import logging
+import sys
 
 from aiohttp import ClientResponseError, web
 
 from homeassistant.components import webhook
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_TOKEN, CONF_URL
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.loader import async_get_integration
 
 from .api import ManagerAuthError, ManagerClient, ManagerForbiddenError
 from .const import (
@@ -192,6 +196,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_reload_on_options))
     _register_webhook(hass, entry, coordinator)
+    _register_reload_code(hass)
     return True
 
 
@@ -234,3 +239,42 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _reload_on_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+def _forget_code(hass: HomeAssistant, package: str, domain: str) -> None:
+    """Drop a package's modules so the next setup imports them from disk again.
+
+    Home Assistant keeps its own copy of each imported integration module
+    (hass.data["components"], keyed "<domain>" and "<domain>.<platform>") next to
+    sys.modules; both have to go.
+    """
+    for cache, root in ((sys.modules, package), (hass.data.get("components", {}), domain),
+                        (hass.data.get("missing_platforms", {}), domain)):
+        for key in [n for n in cache if n == root or n.startswith(root + ".")]:
+            del cache[key]
+    importlib.invalidate_caches()  # or a file added since the last import may not be found
+
+
+def _register_reload_code(hass: HomeAssistant) -> None:
+    """Dev: mikrotik_manager.reload_code loads the Python files from disk without a restart."""
+
+    async def _reload_code(call: ServiceCall) -> None:
+        # Disabled and ignored entries are never set up, so they are not ours to reload.
+        entries = hass.config_entries.async_entries(
+            DOMAIN, include_ignore=False, include_disabled=False
+        )
+        for entry in entries:
+            if not await hass.config_entries.async_unload(entry.entry_id):
+                raise HomeAssistantError(f"{DOMAIN} did not unload; restart Home Assistant instead")
+        _forget_code(hass, __name__, DOMAIN)
+        try:
+            await (await async_get_integration(hass, DOMAIN)).async_get_component()
+        except Exception as err:
+            # This handler stays registered, so the action works again once the code is fixed.
+            raise HomeAssistantError(f"{DOMAIN} is unloaded: the new code did not load ({err}). "
+                                     f"Fix it and call {DOMAIN}.reload_code again") from err
+        failed = [e.title for e in entries if not await hass.config_entries.async_setup(e.entry_id)]
+        if failed:
+            raise HomeAssistantError(f"{DOMAIN} did not set up again for {failed}; see the log")
+
+    async_register_admin_service(hass, DOMAIN, "reload_code", _reload_code)
