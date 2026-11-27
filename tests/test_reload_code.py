@@ -1,4 +1,5 @@
 """mikrotik_manager.reload_code: unload, re-import the modules from disk, set up again."""
+import json
 import sys
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from homeassistant.config_entries import ConfigEntryState  # noqa: E402
 from pytest_homeassistant_custom_component.common import MockConfigEntry  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from custom_components.mikrotik_manager import _clear_marketplace_restart  # noqa: E402
+from custom_components.mikrotik_manager import _CODE_VERSION, _clear_marketplace_restart  # noqa: E402
 from custom_components.mikrotik_manager.const import DOMAIN
 from homeassistant.helpers import issue_registry as ir  # noqa: E402
 
@@ -36,10 +37,13 @@ async def test_reload_code_replaces_the_modules(hass, aioclient_mock, enable_cus
     assert list(hass.data[DOMAIN]) == [entry.entry_id]
 
 
-async def test_reload_clears_only_marketplaces_mikrotik_manager_restart_repairs(hass) -> None:
+async def test_reload_clears_only_the_running_versions_restart_repair(hass, monkeypatch) -> None:
+    monkeypatch.setitem(_clear_marketplace_restart.__globals__, "_CODE_VERSION", "1.2.3")
     for domain, issue_id, issue_domain in (
-        ("marketplace", "restart_required_1_tags/2026.11.27.2", DOMAIN),
-        ("marketplace", "restart_required_2_tags/2026.11.26.01", "ssh"),
+        ("marketplace", "restart_required_1_tags/1.2.3", DOMAIN),
+        ("marketplace", "restart_required_2_tags/v1.2.3", DOMAIN),
+        ("marketplace", "restart_required_3_tags/1.2.4", DOMAIN),
+        ("marketplace", "restart_required_4_tags/1.2.3", "ssh"),
         ("marketplace", "critical_x", DOMAIN),
         (DOMAIN, "restart_required_x", DOMAIN),
     ):
@@ -49,7 +53,13 @@ async def test_reload_clears_only_marketplaces_mikrotik_manager_restart_repairs(
         )
     _clear_marketplace_restart(hass)
     assert set(ir.async_get(hass).issues) == {
-        ("marketplace", "restart_required_2_tags/2026.11.26.01"),
+        ("marketplace", "restart_required_3_tags/1.2.4"),
+        ("marketplace", "restart_required_4_tags/1.2.3"),
         ("marketplace", "critical_x"),
         (DOMAIN, "restart_required_x"),
     }
+
+
+def test_code_version_is_the_manifest_version() -> None:
+    manifest = Path(__file__).parents[1] / "custom_components" / "mikrotik_manager" / "manifest.json"
+    assert _CODE_VERSION == json.loads(manifest.read_text())["version"]
