@@ -9,7 +9,9 @@ from homeassistant.config_entries import ConfigEntryState  # noqa: E402
 from pytest_homeassistant_custom_component.common import MockConfigEntry  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from custom_components.mikrotik_manager.const import DOMAIN  # noqa: E402
+from custom_components.mikrotik_manager import _clear_marketplace_restart  # noqa: E402
+from custom_components.mikrotik_manager.const import DOMAIN
+from homeassistant.helpers import issue_registry as ir  # noqa: E402
 
 PACKAGE = "custom_components.mikrotik_manager"
 
@@ -32,3 +34,22 @@ async def test_reload_code_replaces_the_modules(hass, aioclient_mock, enable_cus
     assert sys.modules[PACKAGE] is not old[PACKAGE]
     assert hass.services.has_service(DOMAIN, "reload_code")
     assert list(hass.data[DOMAIN]) == [entry.entry_id]
+
+
+async def test_reload_clears_only_marketplaces_mikrotik_manager_restart_repairs(hass) -> None:
+    for domain, issue_id, issue_domain in (
+        ("marketplace", "restart_required_1_tags/2026.11.27.2", DOMAIN),
+        ("marketplace", "restart_required_2_tags/2026.11.26.01", "ssh"),
+        ("marketplace", "critical_x", DOMAIN),
+        (DOMAIN, "restart_required_x", DOMAIN),
+    ):
+        ir.async_create_issue(
+            hass, domain, issue_id, is_fixable=False, issue_domain=issue_domain,
+            severity=ir.IssueSeverity.WARNING, translation_key="x",
+        )
+    _clear_marketplace_restart(hass)
+    assert set(ir.async_get(hass).issues) == {
+        ("marketplace", "restart_required_2_tags/2026.11.26.01"),
+        ("marketplace", "critical_x"),
+        (DOMAIN, "restart_required_x"),
+    }
